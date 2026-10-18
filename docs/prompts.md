@@ -39,6 +39,7 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-21 | 4 | Refactorización con los tests como red | "Cero cambios de comportamiento" · suite + cobertura + mutmut antes y después | Aceptado |
 | P-22 | 3–4 | Mutante sobreviviente tras refactorizar (`astimezone(None)`) | Investigar el sobreviviente antes de "arreglarlo" | Aceptado |
 | P-23 | 4 | Arreglos menores de la revisión (llave con espacios, concordancia de género) | Test-first · cambio compatible en el catálogo | Aceptado |
+| P-24 | 5 | Docstrings, README, CHANGELOG y actualización de `CLAUDE.md` | Documentation desde el código · verificar ejemplos ejecutándolos | Ajustado (2 correcciones) |
 
 ---
 
@@ -900,3 +901,52 @@ nuevo, llave con espacios y llave con un espacio en medio).
 **Decisión:** `pattern=r"^\S+$"` en el `Header` en lugar de validar en el servicio.
 Es una regla de **forma**, igual que el resto de las validaciones de entrada, y
 FastAPI la documenta automáticamente en `/docs`.
+
+---
+
+## P-24 · Documentación: docstrings, README, CHANGELOG y `CLAUDE.md`
+
+**Fase:** 5 · Documentación
+**Técnica:** documentación generada **desde el código y los tests** (no de memoria)
+· verificar cada ejemplo **ejecutándolo** contra el servidor real · lint de
+docstrings con `ruff --select D1`
+**Contexto:** `@tasks/` `@docs/especificacion.md` `@docs/prompts.md`
+`@README.md` `@CLAUDE.md` `@docs/evidencia/`
+
+```text
+Fase de documentación. Antes de escribir, corre `ruff check tasks --select D1`
+para ver qué funciones públicas no tienen docstring.
+1. Docstrings en español en tasks/routes.py: aparecen como descripción en
+   /docs, así que incluye los códigos de error de cada ruta (y declara
+   responses={...} para que OpenAPI los muestre).
+2. README: qué es, instalación, uso con ejemplos curl (crear idempotente,
+   cambiar estado, filtrar, errores), reglas de negocio, configuración
+   (TASKS_TIMEZONE), cómo correr tests/cobertura/ruff/mutmut, estructura,
+   guía para alguien nuevo y limitaciones conocidas.
+3. CHANGELOG.md en formato Keep a Changelog (Agregado / Cambiado / Corregido).
+4. Actualiza @CLAUDE.md con lo aprendido en el proceso, para que la próxima
+   sesión no repita errores (zona horaria en tests, comparar detail completo,
+   correr mutmut después de refactorizar).
+5. Levanta el servidor con uvicorn y ejecuta TODOS los curl del README; si una
+   respuesta no coincide con lo documentado, corrige el README, no el código.
+Nada de cifras inventadas: toma los números de pytest, coverage y mutmut.
+```
+
+**Resultado:** docstrings en las 4 rutas, con `responses` declaradas
+(`/openapi.json` ahora lista 201/409/422 en `POST /tasks`). README reescrito,
+`CHANGELOG.md` nuevo y `CLAUDE.md` v2 (83 líneas). Todos los `curl` del README se
+probaron contra `uvicorn` (crear, reintento → mismo `id`, PATCH, filtro, 422 y
+409, `/docs` → 200).
+
+**Correcciones durante la verificación:**
+
+| Problema | Cómo se detectó | Corrección |
+|----------|-----------------|------------|
+| El bloque de errores del README era `json` con comentarios `//` (JSON inválido) | Al revisar los bloques de código | Se cambió a `text`, con el código de estado al lado |
+| El test de zona horaria usa `time.tzset()`, que **no existe en Windows** | Al documentar la compatibilidad con Windows en el README | `@pytest.mark.skipif(not hasattr(time, "tzset"))` |
+| El README decía "123/123 mutantes" | Corrida final de `mutmut` → 126 (el `pattern` de la llave agregó mutantes) | Cifra actualizada desde `final_mutmut.log` |
+
+**Evidencia final** (`docs/evidencia/final_*.log`): **99 passed**, **100 %** de
+líneas y ramas, `ruff` limpio, **126/126** mutantes muertos.
+
+**Decisión:** ajustado y aceptado.

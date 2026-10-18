@@ -13,7 +13,8 @@ el proyecto corre sin infraestructura.
   - `repository.py` — acceso a datos (aquí, un `dict` en memoria).
 - `tasks/` — recurso de tareas de equipo (mismo patrón que `users/`). Especificación y
   criterios de aceptación en `docs/especificacion.md`: **léela antes de tocar `tasks/`**.
-  - `tasks/clock.py` — reloj inyectable (`today()`); los tests lo reemplazan.
+  - `tasks/clock.py` — reloj inyectable: `now()` es un instante UTC; `today()` es el día
+    en la zona horaria del negocio (`TASKS_TIMEZONE`). Los tests fijan `today()`.
 - `core/errors.py` — catálogo de errores. Toda respuesta de error sale de aquí.
 - `tests/` — un archivo por recurso: `test_<recurso>.py`.
 
@@ -21,7 +22,8 @@ el proyecto corre sin infraestructura.
 
 - Las rutas declaran `response_model=` y devuelven modelos Pydantic, nunca `dict` crudos.
 - Los errores se levantan con las funciones de `core/errors.py`
-  (`not_found`, `invalid_request`, `already_exists`), no con `HTTPException` a mano.
+  (`not_found`, `invalid_request`, `already_exists`, `conflict`), no con `HTTPException`
+  a mano. Recursos femeninos: `not_found("tarea", id, feminine=True)`.
 - La ruta delega en `service.py`; la lógica y las decisiones de error viven ahí.
 - Identificadores en inglés y `snake_case`, sin abreviaturas. Mensajes de error en español.
 - Cada endpoint nuevo lleva su test en el archivo del recurso, con al menos un caso
@@ -47,6 +49,11 @@ el proyecto corre sin infraestructura.
   Integración HTTP con `TestClient` en `tests/test_tasks.py`.
 - Usa `pytest.mark.parametrize` para familias de casos inválidos (títulos, prioridades).
 - No uses la fecha real en los tests: fija el reloj.
+- Lo que dependa de la zona horaria se prueba forzando otra zona en el servidor
+  (`monkeypatch.setenv("TZ", ...)` + `time.tzset()`): la máquina de pruebas puede estar
+  en la misma zona que el negocio y ocultar el bug (lo encontró mutmut, P-22).
+- Compara el `detail` completo con `==`, no con `in`: así mueren los mutantes de mensajes.
+- Después de refactorizar `tasks/`, corre `mutmut run`: la cobertura no basta.
 
 ## Cómo ejecutar
 
@@ -72,4 +79,5 @@ mutmut run                         # mutation testing de tasks/ (config en pypro
 
 - Docstring en español en cada función pública de `tasks/` (qué hace, errores que levanta).
 - Cambios relevantes en `CHANGELOG.md` (formato Keep a Changelog).
-- Prompts usados durante el desarrollo: `docs/prompts.md`.
+- Prompts usados durante el desarrollo: `docs/prompts.md` (agrega cada prompt nuevo con
+  técnica, contexto, resultado y decisión).

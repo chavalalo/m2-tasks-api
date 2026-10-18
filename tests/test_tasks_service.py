@@ -205,6 +205,7 @@ def test_crear_tarea_para_hoy_en_la_tarde_de_cdmx_es_valido(
     assert task.due_date == date(2026, 10, 18)
 
 
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="time.tzset solo existe en Unix")
 @pytest.mark.parametrize("server_tz", ["UTC", "Asia/Tokyo"])
 def test_clock_today_no_depende_de_la_zona_horaria_del_servidor(
     monkeypatch: pytest.MonkeyPatch, server_tz: str
