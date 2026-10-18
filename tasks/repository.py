@@ -47,12 +47,12 @@ def save(task: Task) -> Task:
 
 def find_by_idempotency_key(key: str) -> tuple[str, int] | None:
     """`(huella_del_cuerpo, task_id)` asociada a la llave, o `None` si no se ha usado."""
-    raise NotImplementedError
+    return _idempotency_keys.get(key)
 
 
 def remember_idempotency_key(key: str, fingerprint: str, task_id: int) -> None:
     """Asocia la llave con la huella del cuerpo y la tarea creada."""
-    raise NotImplementedError
+    _idempotency_keys[key] = (fingerprint, task_id)
 
 
 def reset() -> None:

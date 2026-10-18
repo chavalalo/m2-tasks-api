@@ -4,6 +4,8 @@
 dominio (con `core.errors`). Valida al responsable a través de `users.service`,
 nunca del repositorio de usuarios.
 """
+import hashlib
+
 from core import errors
 from tasks import clock, repository
 from tasks.schemas import StatusChange, Task, TaskCreate, TaskStatus, TaskStatusUpdate
@@ -26,6 +28,12 @@ def create_task(data: TaskCreate, idempotency_key: str | None = None) -> Task:
       - 409 si `idempotency_key` ya se usó con otro cuerpo (CA-09).
     Si la llave ya se usó con el mismo cuerpo, devuelve la tarea original (CA-08).
     """
+    fingerprint = _fingerprint(data)
+    if idempotency_key is not None:
+        previous = repository.find_by_idempotency_key(idempotency_key)
+        if previous is not None:
+            return _replay(idempotency_key, previous, fingerprint)
+
     _validate_new_task(data)
     created_at = clock.now()
     task = Task(
@@ -40,7 +48,24 @@ def create_task(data: TaskCreate, idempotency_key: str | None = None) -> Task:
         created_at=created_at,
         updated_at=created_at,
     )
-    return repository.add(task)
+    repository.add(task)
+    if idempotency_key is not None:
+        # Solo se recuerda la llave cuando la tarea se creó (CA-11).
+        repository.remember_idempotency_key(idempotency_key, fingerprint, task.id)
+    return task
+
+
+def _fingerprint(data: TaskCreate) -> str:
+    """Huella del cuerpo ya normalizado (título recortado, defaults aplicados)."""
+    return hashlib.sha256(data.model_dump_json().encode()).hexdigest()
+
+
+def _replay(key: str, previous: tuple[str, int], fingerprint: str) -> Task:
+    """Respuesta a un reintento: la tarea original, o 409 si el cuerpo cambió (CA-08/CA-09)."""
+    previous_fingerprint, task_id = previous
+    if previous_fingerprint != fingerprint:
+        raise errors.conflict(f"La llave de idempotencia ya se usó con otro contenido: {key}")
+    return get_task(task_id)
 
 
 def _validate_new_task(data: TaskCreate) -> None:

@@ -25,6 +25,9 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-07 | 2 | Iteración 1 · implementación mínima (verde) | Incremental · "lo mínimo para pasar" | Aceptado |
 | P-08 | 3 | Iteración 2 · tests de validaciones y fronteras (rojo) | Test-first · enumerar clases de casos · parametrize | Aceptado |
 | P-09 | 2 | Iteración 2 · validaciones de dominio (verde) | Incremental · restricción de orden ("validar antes de reservar id") | Aceptado |
+| P-10 | 3 | Iteración 3 · tests de idempotencia (rojo) | Test-first · contraejemplos explícitos | Aceptado |
+| P-11 | 2 | Iteración 3 · idempotencia (verde) | Incremental · pedir el orden de operaciones razonado | Aceptado |
+| P-12 | 3 | Caso límite de orden: reintento al día siguiente + mutación manual | Pregunta "¿qué pasa si…?" · mutación a mano (Clase 2 M2) | Aceptado |
 
 ---
 
@@ -352,5 +355,107 @@ Corre pytest completo (los tests de users deben seguir verdes) y ruff.
   `users` cambió: sus 6 tests siguen verdes (integración sin conflictos).
 - `ruff --fix` reordenó un import (`users` después de `tasks`, por orden
   alfabético).
+
+**Decisión:** aceptado.
+
+---
+
+## P-10 · Iteración 3 — tests de idempotencia (rojo)
+
+**Fase:** 3 · Tests
+**Técnica:** test-first · contraejemplos (casos que deben **no** comportarse como
+reintento)
+**Contexto:** `@docs/especificacion.md` (CA-08 a CA-11) `@tests/test_tasks.py`
+
+```text
+Iteración 3 (test-first): idempotencia de POST /tasks con el header
+Idempotency-Key. Escribe tests para CA-08, CA-09, CA-10 y CA-11, y además estos
+contraejemplos y bordes:
+- llaves distintas con el mismo cuerpo → dos tareas (la llave identifica el
+  reintento, no el contenido);
+- "  Revisar logs  " y "Revisar logs" con la misma llave → mismo reintento
+  (el cuerpo se compara ya normalizado);
+- llave vacía → 422.
+Para comprobar que el reintento no duplicó, verifica que no exista la tarea 2
+(todavía no hay GET /tasks). Corre y explica cada rojo.
+```
+
+**Resultado:** 7 tests nuevos; **3 failed, 39 passed**
+(`docs/evidencia/it3_rojo.log`). Los 4 que pasaron sin implementar nada eran
+esperables: CA-10, llaves distintas y llave vacía ya se cumplían (el último por
+`Header(min_length=1)` del esqueleto). CA-11 pasaba "por accidente", porque
+todavía no se guardaba ninguna llave. Se mantuvo para que siga protegiendo el
+comportamiento cuando sí se guarden.
+
+---
+
+## P-11 · Iteración 3 — idempotencia (verde)
+
+**Fase:** 2 · Generación
+**Técnica:** incremental · pedir el **orden de las operaciones razonado** antes del
+código (chain-of-thought para auditar)
+**Contexto:** `@tasks/service.py` `@tasks/repository.py` `@core/errors.py`
+
+```text
+Implementa la idempotencia para que pasen los tests de la iteración 3.
+Antes de escribir código, dime en qué ORDEN harás estos pasos dentro de
+create_task y por qué: calcular la huella del cuerpo, buscar la llave,
+validar reglas de dominio, reservar id, guardar la tarea, guardar la llave.
+Después impleméntalo:
+- huella = sha256 del cuerpo ya normalizado (model_dump_json);
+- llave conocida + misma huella → devolver la tarea original;
+- llave conocida + otra huella → errors.conflict con un mensaje que mencione
+  la llave;
+- guardar la llave SOLO si la tarea se creó.
+```
+
+**Orden propuesto y aceptado:**
+
+1. Calcular la huella.
+2. Si hay llave **y ya se usó**: responder el reintento (original o 409) **sin
+   validar**.
+3. Validar reglas de dominio.
+4. Reservar id y guardar la tarea.
+5. Guardar la llave (solo aquí, por CA-11).
+
+**Por qué el paso 2 va antes del 3:** un reintento debe recibir lo mismo que la
+petición original. Si se validara primero, un reintento al día siguiente de una
+tarea con fecha "hoy" recibiría 422 por "fecha en el pasado", aunque la tarea sí
+se creó.
+
+**Resultado:** **42 passed**, `ruff` limpio.
+
+---
+
+## P-12 · Caso límite de orden: reintento al día siguiente + mutación manual
+
+**Fase:** 3 · Tests (calidad de la suite)
+**Técnica:** "¿qué pasa si…?" sobre la decisión de P-11 · **mutación manual**
+(Clase 2 del M2: romper el código a propósito y ver si algún test se da cuenta)
+**Contexto:** `@tasks/service.py` `@tests/test_tasks.py` `@tests/conftest.py`
+
+```text
+El orden "revisar llave antes de validar" de create_task es una decisión
+importante, pero ningún test la protege: si alguien lo invierte, la suite
+seguiría verde. Escribe un test que lo fije: crear una tarea con due_date de
+hoy y una llave; mover el reloj al día siguiente con monkeypatch; reintentar
+con la misma llave → 201 con la tarea original.
+Luego demuéstrame que el test sirve: invierte temporalmente el orden en
+create_task, corre la suite, confirma que SOLO ese test falla y restaura el
+código.
+```
+
+**Resultado:**
+
+| Paso | Suite |
+|------|-------|
+| Test nuevo con el código correcto | **43 passed** |
+| Mutante: `_validate_new_task` movido antes de revisar la llave | **1 failed** (justo el test nuevo), 42 passed |
+| Código restaurado | **43 passed** |
+
+**Lección:** tener cobertura de líneas no basta para saber si un test protege algo. El
+orden ya estaba **cubierto** (todas las líneas se ejecutaban), pero ningún test
+**detectaba** que se invirtiera. Es justo la diferencia entre cobertura y mutation
+testing de la Clase 2.
 
 **Decisión:** aceptado.

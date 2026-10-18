@@ -3,8 +3,12 @@
 Mismo estilo que tests/test_users.py: un caso por test, arrange / act / assert
 separados por una línea en blanco. Cada test menciona el criterio CA-xx que cubre.
 """
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
+
+from tasks import clock
 
 
 def _create(client: TestClient, **overrides: object) -> dict:
@@ -200,3 +204,99 @@ def test_create_task_invalida_no_crea_nada(client: TestClient) -> None:
     created = _create(client)
 
     assert created["id"] == 1
+
+
+# --- POST /tasks · idempotencia ---------------------------------------------------
+
+
+def _post(client: TestClient, payload: dict, key: str | None = None):
+    headers = {"Idempotency-Key": key} if key is not None else {}
+    return client.post("/tasks", json=payload, headers=headers)
+
+
+def test_reintento_con_misma_llave_y_mismo_cuerpo_devuelve_la_misma_tarea(
+    client: TestClient,
+) -> None:
+    """CA-08: el reintento no duplica la tarea."""
+    payload = {"title": "Revisar respaldos nocturnos", "priority": 4}
+    first = _post(client, payload, key="req-001")
+
+    retry = _post(client, payload, key="req-001")
+
+    assert retry.status_code == 201
+    assert retry.json() == first.json()
+    assert client.get("/tasks/2").status_code == 404
+
+
+def test_misma_llave_con_otro_cuerpo_devuelve_409(client: TestClient) -> None:
+    """CA-09."""
+    _post(client, {"title": "Revisar respaldos nocturnos"}, key="req-001")
+
+    response = _post(client, {"title": "Otra tarea distinta"}, key="req-001")
+
+    assert response.status_code == 409
+    assert "req-001" in response.json()["detail"]
+    assert "idempotencia" in response.json()["detail"]
+
+
+def test_sin_llave_dos_peticiones_iguales_crean_dos_tareas(client: TestClient) -> None:
+    """CA-10: la idempotencia es opcional y explícita."""
+    payload = {"title": "Revisar respaldos nocturnos"}
+
+    first = _post(client, payload)
+    second = _post(client, payload)
+
+    assert first.json()["id"] != second.json()["id"]
+
+
+def test_llaves_distintas_con_el_mismo_cuerpo_crean_dos_tareas(client: TestClient) -> None:
+    """CA-08 (contraejemplo): la llave, no el contenido, identifica el reintento."""
+    payload = {"title": "Revisar respaldos nocturnos"}
+
+    first = _post(client, payload, key="req-001")
+    second = _post(client, payload, key="req-002")
+
+    assert first.json()["id"] != second.json()["id"]
+
+
+def test_peticion_fallida_no_reserva_la_llave(client: TestClient) -> None:
+    """CA-11: el reintento corregido con la misma llave sí crea la tarea."""
+    _post(client, {"title": "Revisar logs", "due_date": "2000-01-01"}, key="req-001")
+
+    response = _post(client, {"title": "Revisar logs", "due_date": "2026-12-01"}, key="req-001")
+
+    assert response.status_code == 201
+    assert response.json()["id"] == 1
+
+
+def test_reintento_equivalente_tras_normalizar_el_titulo_no_duplica(
+    client: TestClient,
+) -> None:
+    """CA-08: "  X  " y "X" son el mismo cuerpo una vez recortado el título."""
+    first = _post(client, {"title": "Revisar logs"}, key="req-001")
+
+    retry = _post(client, {"title": "  Revisar logs  "}, key="req-001")
+
+    assert retry.status_code == 201
+    assert retry.json()["id"] == first.json()["id"]
+
+
+def test_llave_de_idempotencia_vacia_devuelve_422(client: TestClient) -> None:
+    """CA-08 (forma): una llave vacía no es una llave."""
+    response = _post(client, {"title": "Revisar logs"}, key="")
+
+    assert response.status_code == 422
+
+
+def test_reintento_al_dia_siguiente_devuelve_la_original_aunque_la_fecha_ya_paso(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CA-08: la llave se revisa ANTES de validar; un reintento no se re-evalúa."""
+    payload = {"title": "Revisar logs", "due_date": "2026-10-18"}
+    first = _post(client, payload, key="req-001")
+    monkeypatch.setattr(clock, "today", lambda: date(2026, 10, 19))
+
+    retry = _post(client, payload, key="req-001")
+
+    assert retry.status_code == 201
+    assert retry.json()["id"] == first.json()["id"]
