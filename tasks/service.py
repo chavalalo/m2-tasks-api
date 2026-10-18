@@ -35,24 +35,24 @@ def create_task(data: TaskCreate, idempotency_key: str | None = None) -> Task:
             return _replay(idempotency_key, previous, fingerprint)
 
     _validate_new_task(data)
+    task = repository.add(_build_new_task(data))
+    if idempotency_key is not None:
+        # Solo se recuerda la llave cuando la tarea se creó (CA-11).
+        repository.remember_idempotency_key(idempotency_key, fingerprint, task.id)
+    return task
+
+
+def _build_new_task(data: TaskCreate) -> Task:
+    """Tarea nueva en `pending`: un solo instante para fechas e historial."""
     created_at = clock.now()
-    task = Task(
+    return Task(
         id=repository.next_id(),
-        title=data.title,
-        description=data.description,
-        priority=data.priority,
-        due_date=data.due_date,
-        assignee_id=data.assignee_id,
+        **data.model_dump(),
         status=TaskStatus.PENDING,
         status_history=[StatusChange(status=TaskStatus.PENDING, changed_at=created_at)],
         created_at=created_at,
         updated_at=created_at,
     )
-    repository.add(task)
-    if idempotency_key is not None:
-        # Solo se recuerda la llave cuando la tarea se creó (CA-11).
-        repository.remember_idempotency_key(idempotency_key, fingerprint, task.id)
-    return task
 
 
 def _fingerprint(data: TaskCreate) -> str:
@@ -60,12 +60,11 @@ def _fingerprint(data: TaskCreate) -> str:
     return hashlib.sha256(data.model_dump_json().encode()).hexdigest()
 
 
-def _replay(key: str, previous: tuple[str, int], fingerprint: str) -> Task:
+def _replay(key: str, previous: repository.IdempotencyRecord, fingerprint: str) -> Task:
     """Respuesta a un reintento: la tarea original, o 409 si el cuerpo cambió (CA-08/CA-09)."""
-    previous_fingerprint, task_id = previous
-    if previous_fingerprint != fingerprint:
+    if previous.fingerprint != fingerprint:
         raise errors.conflict(f"La llave de idempotencia ya se usó con otro contenido: {key}")
-    return get_task(task_id)
+    return get_task(previous.task_id)
 
 
 def _validate_new_task(data: TaskCreate) -> None:

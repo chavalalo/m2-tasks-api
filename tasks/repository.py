@@ -4,10 +4,20 @@ Igual que `users/repository.py`: imita la API de un repositorio real para que
 `service.py` no note la diferencia cuando se cambie por una base de datos.
 También guarda las llaves de idempotencia ya usadas.
 """
+from typing import NamedTuple
+
 from tasks.schemas import Task, TaskStatus
 
+
+class IdempotencyRecord(NamedTuple):
+    """Lo que se recuerda de una llave de idempotencia ya usada."""
+
+    fingerprint: str  # huella del cuerpo de la petición original
+    task_id: int  # tarea que creó esa petición
+
+
 _tasks: dict[int, Task] = {}
-_idempotency_keys: dict[str, tuple[str, int]] = {}
+_idempotency_keys: dict[str, IdempotencyRecord] = {}
 _next_id: int = 1
 
 
@@ -37,14 +47,14 @@ def list_all(
     priority: int | None = None,
 ) -> list[Task]:
     """Tareas que cumplen todos los filtros dados, ordenadas por `id`."""
-    tasks = sorted(_tasks.values(), key=lambda task: task.id)
-    if status is not None:
-        tasks = [task for task in tasks if task.status == status]
-    if assignee_id is not None:
-        tasks = [task for task in tasks if task.assignee_id == assignee_id]
-    if priority is not None:
-        tasks = [task for task in tasks if task.priority == priority]
-    return tasks
+    def matches(task: Task) -> bool:
+        return (
+            (status is None or task.status == status)
+            and (assignee_id is None or task.assignee_id == assignee_id)
+            and (priority is None or task.priority == priority)
+        )
+
+    return sorted((task for task in _tasks.values() if matches(task)), key=lambda t: t.id)
 
 
 def save(task: Task) -> Task:
@@ -53,14 +63,14 @@ def save(task: Task) -> Task:
     return task
 
 
-def find_by_idempotency_key(key: str) -> tuple[str, int] | None:
-    """`(huella_del_cuerpo, task_id)` asociada a la llave, o `None` si no se ha usado."""
+def find_by_idempotency_key(key: str) -> IdempotencyRecord | None:
+    """Registro asociado a la llave, o `None` si no se ha usado."""
     return _idempotency_keys.get(key)
 
 
 def remember_idempotency_key(key: str, fingerprint: str, task_id: int) -> None:
     """Asocia la llave con la huella del cuerpo y la tarea creada."""
-    _idempotency_keys[key] = (fingerprint, task_id)
+    _idempotency_keys[key] = IdempotencyRecord(fingerprint, task_id)
 
 
 def reset() -> None:
