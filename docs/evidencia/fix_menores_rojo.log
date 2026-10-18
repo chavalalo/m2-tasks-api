@@ -1,0 +1,4 @@
+FAILED tests/test_tasks.py::test_get_task_inexistente_devuelve_404
+FAILED tests/test_tasks.py::test_llave_de_idempotencia_invalida_devuelve_422[espacios]
+FAILED tests/test_tasks.py::test_llave_de_idempotencia_invalida_devuelve_422[con-espacio]
+3 failed, 96 passed in 0.70s

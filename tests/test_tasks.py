@@ -92,7 +92,7 @@ def test_get_task_inexistente_devuelve_404(client: TestClient) -> None:
     response = client.get("/tasks/999")
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "tarea no encontrado: 999"
+    assert response.json()["detail"] == "tarea no encontrada: 999"
 
 
 # --- POST /tasks · validaciones --------------------------------------------------
@@ -281,11 +281,21 @@ def test_reintento_equivalente_tras_normalizar_el_titulo_no_duplica(
     assert retry.json()["id"] == first.json()["id"]
 
 
-def test_llave_de_idempotencia_vacia_devuelve_422(client: TestClient) -> None:
-    """CA-08 (forma): una llave vacía no es una llave."""
-    response = _post(client, {"title": "Revisar logs"}, key="")
+@pytest.mark.parametrize(
+    "key", ["", "   ", "req 001", "x" * 101], ids=["vacia", "espacios", "con-espacio", "101-chars"]
+)
+def test_llave_de_idempotencia_invalida_devuelve_422(client: TestClient, key: str) -> None:
+    """CA-08 (forma): la llave es un token sin espacios de 1 a 100 caracteres."""
+    response = _post(client, {"title": "Revisar logs"}, key=key)
 
     assert response.status_code == 422
+
+
+def test_llave_de_idempotencia_uuid_es_valida(client: TestClient) -> None:
+    """CA-08 (forma): el formato típico de llave (UUID) se acepta."""
+    response = _post(client, {"title": "Revisar logs"}, key="550e8400-e29b-41d4-a716-446655440000")
+
+    assert response.status_code == 201
 
 
 def test_reintento_al_dia_siguiente_devuelve_la_original_aunque_la_fecha_ya_paso(

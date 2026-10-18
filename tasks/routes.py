@@ -28,7 +28,8 @@ def get_task(task_id: int) -> Task:
 @router.post("", response_model=Task, status_code=status.HTTP_201_CREATED)
 def create_task(
     data: TaskCreate,
-    idempotency_key: str | None = Header(default=None, min_length=1, max_length=100),
+    # Token opaco sin espacios (p. ej. un UUID) generado por el cliente.
+    idempotency_key: str | None = Header(default=None, max_length=100, pattern=r"^\S+$"),
 ) -> Task:
     return service.create_task(data, idempotency_key)
 

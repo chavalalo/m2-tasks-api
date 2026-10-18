@@ -35,6 +35,10 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-17 | 4 | Pruebas exploratorias en busca de bugs | Entradas hostiles · `raise_server_exceptions=False` | Aceptado (sin 500; 1 hallazgo menor) |
 | P-18 | 4 | Bug de zona horaria: hipótesis antes que solución | Síntoma + contexto + esperado · "no cambies código todavía" | Aceptado |
 | P-19 | 4 | Bug de zona horaria: test en rojo → fix mínimo → validación | Reproducir primero · fix mínimo · validar con la suite | Aceptado |
+| P-20 | 4 | Code review de `tasks/` por categorías y severidad | Prompt de review de la Clase 4 · anti-complacencia · falsos positivos | Aceptado (6 hallazgos, 2 falsos positivos) |
+| P-21 | 4 | Refactorización con los tests como red | "Cero cambios de comportamiento" · suite + cobertura + mutmut antes y después | Aceptado |
+| P-22 | 3–4 | Mutante sobreviviente tras refactorizar (`astimezone(None)`) | Investigar el sobreviviente antes de "arreglarlo" | Aceptado |
+| P-23 | 4 | Arreglos menores de la revisión (llave con espacios, concordancia de género) | Test-first · cambio compatible en el catálogo | Aceptado |
 
 ---
 
@@ -756,3 +760,143 @@ devuelve **201** con `due_date = 2026-10-18`.
   del sistema, pero en Windows no existe sin ese paquete.
 
 **Decisión:** aceptado.
+
+---
+
+## P-20 · Code review de `tasks/` por categorías y severidad
+
+**Fase:** 4 · Refactorización
+**Técnica:** prompt de review reutilizable de la Clase 4 (categorías + severidad
++ formato accionable) · "si no hay bloqueantes, dilo" · pedir explícitamente
+**falsos positivos**
+**Contexto:** `git diff main...feature/tasks -- tasks/ core/ users/` `@CLAUDE.md`
+
+```text
+Actúa como revisor senior de un equipo que va a mantener este código.
+Revisa el diff de la rama contra main (solo tasks/, core/ y users/) en estas
+categorías: bugs y casos límite, entrada sin validar, code smells (funciones
+largas, duplicación, obsesión por primitivos), coherencia con @CLAUDE.md.
+Formato por hallazgo: archivo:línea · categoría · severidad
+(BLOQUEANTE / MENOR / FALSO POSITIVO) · riesgo · arreglo propuesto.
+Separa los que son refactorización (no cambian comportamiento) de los que
+cambian comportamiento. Si no hay bloqueantes, dilo; no inventes hallazgos.
+```
+
+**Hallazgos y veredicto:**
+
+| # | Ubicación | Hallazgo | Severidad (IA) | Mi veredicto |
+|---|-----------|----------|----------------|--------------|
+| 1 | `service.py` `create_task` | Mezcla 5 responsabilidades (huella, reintento, validación, construcción y guardado) en ~35 líneas | Menor · refactor | **Confirmado** → R1 |
+| 2 | `repository.py` / `service.py` | `tuple[str, int]` para la llave: se desempaqueta por posición (obsesión por primitivos) | Menor · refactor | **Confirmado** → R2 |
+| 3 | `repository.py` `list_all` | Tres comprensiones casi iguales, una por filtro | Menor · refactor | **Confirmado** → R3 |
+| 4 | `routes.py` | `Idempotency-Key` acepta espacios (`"   "`) | Menor · comportamiento | **Confirmado** → fix (P-23) |
+| 5 | `core/errors.py` | "tarea no encontrado": el catálogo siempre usa masculino | Menor · comportamiento | **Confirmado** → fix (P-23) |
+| 6 | `repository.py` | `_idempotency_keys` crece sin límite (no caducan) | Menor | **Aceptado como limitación**: el almacén es en memoria y de demostración; en producción irían en Redis o en la BD con TTL. Documentado en README |
+| 7 | `routes.py` | El parámetro se llama `status_filter` y no `status` | Menor | **Falso positivo**: `status` ya es el import de `fastapi.status` (códigos HTTP); el `alias="status"` mantiene la URL `?status=` |
+| 8 | `tests/conftest.py` | El fixture del reloj es `autouse` y afecta a los tests de `users` | Menor | **Falso positivo**: `users` no usa el reloj de `tasks`; fijar el día en toda la suite es intencional (determinismo) |
+
+**Bloqueantes:** ninguno (secretos, inyección y entradas sin validar: sin hallazgos).
+
+---
+
+## P-21 · Refactorización con los tests como red de seguridad
+
+**Fase:** 4 · Refactorización
+**Técnica:** "cero cambios de comportamiento" · medir **antes y después** (suite,
+cobertura y mutmut) · un commit solo de refactor
+**Contexto:** `@tasks/service.py` `@tasks/repository.py`
+
+```text
+Aplica SOLO los hallazgos 1, 2 y 3 del review (los de comportamiento van en
+otro commit):
+R1. create_task solo orquesta; extrae _build_new_task(data) para construir la
+    tarea con un único instante.
+R2. Reemplaza tuple[str, int] por un NamedTuple IdempotencyRecord(fingerprint,
+    task_id) en el repositorio.
+R3. list_all con un solo predicado en lugar de tres filtros secuenciales.
+Restricción: cero cambios de comportamiento. Antes de terminar: pytest, ruff,
+cobertura con ramas y mutmut. Si cualquiera empeora, revierte y explícame por qué.
+```
+
+**Antes / después:**
+
+| Métrica | Antes | Después |
+|---------|-------|---------|
+| Tests | 93 passed | 93 passed |
+| Cobertura `tasks` (líneas/ramas) | 100 % | 100 % |
+| `create_task` | 35 líneas, 5 responsabilidades | 13 líneas, solo orquesta |
+| `list_all` | 3 comprensiones | 1 predicado |
+| mutmut | — | **1 sobreviviente** → ver P-22 |
+
+**Cómo los tests actuaron como red:** R1 usa `**data.model_dump()` para copiar
+los campos de entrada. Si el nombre de un campo de `TaskCreate` y de `Task` no
+coincidiera, `test_create_task_con_todos_los_campos` (CA-02) fallaría. El orden
+"validar antes de reservar id" lo protegen `test_create_task_invalida_no_reserva_id`
+y el mock de `next_id`.
+
+---
+
+## P-22 · Mutante sobreviviente tras refactorizar
+
+**Fase:** 3–4 · Calidad de la suite
+**Técnica:** investigar **por qué** sobrevive antes de escribir un test ·
+reproducir el mutante a mano
+**Contexto:** `mutmut show tasks.clock.x_today__mutmut_1` `@tasks/clock.py`
+`@tests/test_tasks_service.py`
+
+```text
+mutmut reporta 1 sobreviviente: today() con astimezone(None) en vez de
+astimezone(BUSINESS_TIMEZONE). Hay tests de regresión de la zona horaria que
+deberían matarlo. Antes de escribir otro test, explícame por qué sobrevive:
+¿qué zona horaria tiene la máquina donde corren los tests?
+Luego escribe el test que lo mate de forma independiente de la máquina y
+demuéstralo reproduciendo el mutante a mano.
+```
+
+**Causa:** la variable de entorno del entorno de pruebas era
+`TZ=America/Mexico_City`, la **misma** zona que la del negocio. `astimezone(None)`
+(zona del servidor) y `astimezone(BUSINESS_TIMEZONE)` daban exactamente lo mismo,
+así que el test de regresión pasaba **por casualidad**. En un servidor en UTC, ese
+mutante reintroduciría el bug P-18 sin que la suite lo detectara.
+
+**Test agregado:** `test_clock_today_no_depende_de_la_zona_horaria_del_servidor`
+fuerza `TZ=UTC` y `TZ=Asia/Tokyo` (`monkeypatch.setenv` + `time.tzset()`, con
+restauración en `finally`).
+
+**Resultado** (`docs/evidencia/mutmut_refactor.log`): mutante reproducido a mano
+→ **2 failed**; mutmut → **123/123 killed**.
+
+**Lección:** el entorno de pruebas es parte de la prueba. El mutante no reveló un
+error en el código, sino uno en la **suite**: un test que dependía de la máquina
+donde corre. La cobertura de líneas jamás lo habría encontrado.
+
+---
+
+## P-23 · Arreglos menores de la revisión
+
+**Fase:** 4 · Debugging y pulido
+**Técnica:** test-first · cambio **compatible** en un módulo compartido
+(`core/errors.py`) · actualizar la especificación junto con el código
+**Contexto:** `@tasks/routes.py` `@core/errors.py` `@docs/especificacion.md`
+`@tests/test_users.py`
+
+```text
+Hallazgos 4 y 5 del review (cambian comportamiento, van en su propio commit):
+- Idempotency-Key: debe ser un token sin espacios de 1 a 100 caracteres
+  (p. ej. un UUID). Tests: vacía, solo espacios, con un espacio en medio, 101
+  caracteres → 422; un UUID → 201.
+- "tarea no encontrado" → "tarea no encontrada". No rompas el mensaje de users:
+  agrega a not_found un parámetro opcional keyword-only feminine=False.
+Primero los tests en rojo, luego el código. Actualiza CA-17 en la
+especificación y agrega el criterio de la llave. Corre los tests de users por
+separado para demostrar que no cambiaron.
+```
+
+**Rojo** (`docs/evidencia/fix_menores_rojo.log`): 3 failed (404 con el texto
+nuevo, llave con espacios y llave con un espacio en medio).
+**Verde** (`docs/evidencia/fix_menores_verde.log`): **99 passed**; `tests/test_users.py`
+→ 6 passed sin cambios.
+
+**Decisión:** `pattern=r"^\S+$"` en el `Header` en lugar de validar en el servicio.
+Es una regla de **forma**, igual que el resto de las validaciones de entrada, y
+FastAPI la documenta automáticamente en `/docs`.

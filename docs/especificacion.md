@@ -56,6 +56,7 @@ Formato: **Dado** (contexto) · **Cuando** (petición) · **Entonces** (respuest
 | CA-09 | Header `Idempotency-Key: K` repetido con **otro cuerpo** | **409** con `detail` que menciona la llave de idempotencia |
 | CA-10 | Dos peticiones iguales **sin** `Idempotency-Key` | Dos tareas distintas (la idempotencia es opcional y explícita) |
 | CA-11 | Una petición que falla por validación con `Idempotency-Key: K` | La llave **no** queda reservada: un reintento corregido con `K` crea la tarea |
+| CA-11b | `Idempotency-Key` vacía, con espacios o de más de 100 caracteres | **422** (la llave es un token opaco, p. ej. un UUID) |
 
 ### GET /tasks — listar
 
@@ -71,7 +72,7 @@ Formato: **Dado** (contexto) · **Cuando** (petición) · **Entonces** (respuest
 | # | Dado / Cuando | Entonces |
 |---|---------------|----------|
 | CA-16 | Tarea existente | **200** con la tarea |
-| CA-17 | Tarea inexistente | **404** con `detail` "tarea no encontrado: <id>" (formato del catálogo `core/errors.py`) |
+| CA-17 | Tarea inexistente | **404** con `detail` "tarea no encontrada: <id>" (catálogo `core/errors.py`) |
 
 ### PATCH /tasks/{task_id}/status — cambiar estado
 

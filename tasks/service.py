@@ -79,7 +79,7 @@ def get_task(task_id: int) -> Task:
     """Tarea por `id`. 404 si no existe (CA-17)."""
     task = repository.get(task_id)
     if task is None:
-        raise errors.not_found("tarea", task_id)
+        raise errors.not_found("tarea", task_id, feminine=True)
     return task
 
 
