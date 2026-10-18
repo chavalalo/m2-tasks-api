@@ -30,6 +30,8 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-12 | 3 | Caso límite de orden: reintento al día siguiente + mutación manual | Pregunta "¿qué pasa si…?" · mutación a mano (Clase 2 M2) | Aceptado |
 | P-13 | 3 | Iteración 4 · tests de listar, filtrar y cambiar estado (rojo) | Test-first · tabla de casos con parametrize · resolver ambigüedades de la especificación | Aceptado |
 | P-14 | 2 | Iteración 4 · listado y transiciones (verde) + cobertura | Incremental · modelos inmutables (`model_copy`) | Aceptado |
+| P-15 | 3 | Tests unitarios del servicio con mocks | Separar unitario vs integración · mocks que verifican interacciones | Aceptado |
+| P-16 | 3 | Mutation testing con `mutmut` + verificación del resultado | Desconfiar de un 100 % · reproducir un mutante a mano | Ajustado (config deprecada) |
 
 ---
 
@@ -536,3 +538,98 @@ devuelve el repositorio, un error a la mitad dejaría una tarea guardada a media
 el repositorio solo cambia en el `save()` final.
 
 **Decisión:** aceptado.
+
+---
+
+## P-15 · Tests unitarios del servicio con mocks
+
+**Fase:** 3 · Tests (unitarios)
+**Técnica:** separar unitario (sin HTTP) de integración (`TestClient`) · mocks
+con `MagicMock` que verifican **interacciones** (con quién habla el servicio),
+no solo resultados · tabla exhaustiva con `itertools.product`
+**Contexto:** `@tasks/service.py` `@tasks/clock.py` `@users/service.py`
+`@tests/conftest.py` `@CLAUDE.md` (sección Tests)
+
+```text
+Crea tests/test_tasks_service.py con tests UNITARIOS de tasks/service.py (sin
+TestClient). Reemplaza dependencias con mocks:
+- users.service.user_exists con un MagicMock: verifica que NO se llama si no hay
+  responsable, que se llama una vez con el id correcto, y que un reintento
+  idempotente tampoco lo llama.
+- repository.next_id con un MagicMock que falle si se llama: demuestra que una
+  tarea inválida no reserva id.
+- clock.now fijo: created_at == updated_at == primera entrada del historial.
+- Las 9 combinaciones de estados (product(TaskStatus, TaskStatus)) contra
+  ALLOWED_TRANSITIONS, y que change_status no muta la tarea original.
+- Cubre también clock.today() (hoy no lo cubre nadie porque el conftest lo
+  reemplaza) y agrega tests/test_main.py para /health y para comprobar que las
+  rutas de tasks aparecen en /openapi.json.
+Arrange/act/assert separados, igual que el resto de la suite.
+```
+
+**Resultado:** 23 tests nuevos → **89 passed**. Cobertura: **100 % de líneas y
+100 % de ramas** en `tasks`, `core`, `users` y `main`
+(`docs/evidencia/cobertura_final.log`).
+
+**Por qué importan los mocks aquí:** los tests de integración comprueban *qué*
+responde la API. Los unitarios comprueban decisiones internas que la API no deja
+ver; por ejemplo, que un reintento **no** vuelve a consultar `users`
+(`assert_not_called`). Si alguien moviera la validación antes de la revisión de
+la llave, este test fallaría aunque el código HTTP siguiera siendo 201.
+
+**Detalle técnico revisado:** el test de `clock.today()` usa `monkeypatch.undo()`
+para quitar el reloj fijo del `conftest` y probar el real. Se verificó que no
+afecta a otros tests, porque `monkeypatch` es por test.
+
+---
+
+## P-16 · Mutation testing con `mutmut` + verificación del resultado
+
+**Fase:** 3 · Calidad de la suite
+**Técnica:** mutation testing (Clase 2 del M2) · **desconfiar de un resultado
+perfecto** · confirmar reproduciendo un mutante a mano
+**Contexto:** `@pyproject.toml` `@tasks/`
+
+```text
+Configura mutmut en @pyproject.toml para mutar solo tasks/ (los demás módulos
+se copian pero no se mutan) y córrelo. Dame el resumen por estado y por módulo.
+Si sobreviven mutantes, muéstrame cada uno con `mutmut show` y escribe el test
+que lo mata.
+Si NO sobrevive ninguno, no lo celebres todavía: demuéstrame que las muertes
+son reales y no producto de errores de importación o configuración. Muéstrame
+2 mutantes con `mutmut show` y reproduce a mano el más importante (el operador
+de la fecha límite, < → <=) para ver qué test lo detecta.
+```
+
+**Resultado:**
+
+| Métrica | Valor |
+|---------|-------|
+| Mutantes generados | 125 (`service` 98, `repository` 26, `clock` 1) |
+| Matados | **125 (100 %)** |
+| Sobrevivientes | 0 |
+
+**Verificación de que el 100 % es real** (`docs/evidencia/mutmut.log`):
+
+- `mutmut show` de mutantes concretos: `and → or` en la validación de fecha,
+  `<` → `<=`, mensajes alterados (`"XX…XX"`, minúsculas, mayúsculas, `None`).
+  Son cambios reales de comportamiento.
+- Mutante de frontera reproducido a mano (`<` → `<=`): lo detectan
+  `test_create_task_fecha_de_hoy_es_valida` (CA-06) y
+  `test_reintento_al_dia_siguiente_…` (P-12) → **2 failed, 87 passed**.
+- Los mutantes de **mensajes** mueren porque los tests comparan el `detail`
+  completo (`==`), no con `in`. En una suite que solo revisara el código de
+  estado, habrían sobrevivido.
+
+**Ajuste:** la primera configuración usaba `paths_to_mutate` y `tests_dir`, que
+`mutmut 3.8` marca como **deprecados** (warnings en la salida). Se cambió a
+`source_paths` y se quitó `tests_dir` (por defecto ya es `tests/`); se volvió a
+correr y dio el mismo resultado, ya sin warnings.
+
+**Reflexión:** el 100 % de mutantes no salió "de la nada". Salió de tres
+decisiones anteriores: probar las **fronteras** explícitas (P-08), comparar
+**mensajes exactos** y fijar el **orden** de operaciones con un test (P-12). Sin
+esas decisiones, los mutantes `<=`, de mensajes y de orden habrían sobrevivido,
+aunque la cobertura de líneas ya era del 100 %.
+
+**Decisión:** ajustado (configuración) y aceptado.

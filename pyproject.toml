@@ -24,3 +24,9 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI usa llamadas en los defaults de los parámetros a propósito.
 extend-immutable-calls = ["fastapi.Query", "fastapi.Path", "fastapi.Body", "fastapi.Header", "fastapi.Depends"]
+
+[tool.mutmut]
+# Mutation testing (Clase 2): introduce cambios pequeños en tasks/ y verifica que
+# algún test falle. Un mutante "sobreviviente" señala un hueco en la suite.
+source_paths = ["tasks/"]
+also_copy = ["core/", "users/", "main.py"]
