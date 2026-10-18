@@ -19,6 +19,8 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-01 | 1 | Explorar el repo base antes de proponer nada | Prompt chaining (paso 1), sin cambios | Aceptado |
 | P-02 | 1 | Criterios de aceptación de la feature | Rol + formato estructurado + anti-invención | Pendiente de confirmar |
 | P-03 | 1 | Actualizar `CLAUDE.md` para el recurso nuevo | Contexto persistente, restricciones explícitas | Aceptado |
+| P-04 | 2 | Esqueleto del recurso (firmas + docstrings, sin lógica) | Skeleton-first · referencia a patrón existente con `@archivo` | Aceptado |
+| P-05 | 2 | Revisar el esqueleto contra la especificación | Rol revisor · verificación ejecutable · anti-complacencia | Ajustado (2 hallazgos) |
 
 ---
 
@@ -136,3 +138,85 @@ y `mutmut`.
 intactas.
 
 **Decisión:** aceptado.
+
+---
+
+## P-04 · Esqueleto del recurso `tasks` (skeleton-first)
+
+**Fase:** 2 · Generación de código
+**Técnica:** skeleton-first (Clase 1, M2) · "imita este archivo" con `@archivo` ·
+prohibido implementar lógica
+**Contexto:** `@CLAUDE.md` `@docs/especificacion.md` `@users/routes.py`
+`@users/service.py` `@users/schemas.py` `@users/repository.py` `@core/errors.py` `@main.py`
+
+```text
+Vamos a construir el recurso tasks con el patrón skeleton-first.
+Crea SOLO el esqueleto, sin lógica: cada función con su firma tipada, su
+docstring en español (qué hace, qué errores levanta y qué CA-xx de
+@docs/especificacion.md cubre) y `raise NotImplementedError` en el cuerpo.
+Archivos:
+- tasks/schemas.py: modelos Pydantic completos (estos SÍ con sus validaciones
+  de forma: longitudes, rangos, tipos), imitando @users/schemas.py.
+- tasks/repository.py: almacén en memoria + llaves de idempotencia, imitando
+  @users/repository.py.
+- tasks/service.py: create_task, get_task, list_tasks, change_status, y la
+  tabla de transiciones permitidas como constante.
+- tasks/routes.py: las 4 rutas, imitando @users/routes.py.
+- tasks/clock.py: today() y now() para poder fijar la fecha en los tests.
+Además: monta el router en @main.py y, si el catálogo de @core/errors.py no
+tiene un 409 con mensaje libre, propón agregarlo (no reutilices
+already_exists para algo que no es "ya existe").
+Al terminar corre `ruff check .`. No escribas tests todavía.
+```
+
+**Resultado:** 6 archivos nuevos en `tasks/`, función `conflict()` agregada al
+catálogo de errores, router montado en `main.py` (versión 0.2.0). `ruff`: sin
+errores.
+
+**Decisión de diseño aceptada:** se agregó `errors.conflict(message)` en lugar de
+reutilizar `already_exists()`. Este último genera "X ya existe: Y", que no
+describe ni una llave de idempotencia reutilizada ni una transición inválida.
+Extender el catálogo respeta la convención "toda respuesta de error sale de
+`core/errors.py`".
+
+**Decisión:** aceptado.
+
+---
+
+## P-05 · Revisar el esqueleto contra la especificación
+
+**Fase:** 2 · Revisión → refinamiento
+**Técnica:** rol de revisor exigente · verificación **ejecutando** código, no
+leyendo · "si no hay hallazgos, dilo"
+**Contexto:** `@tasks/schemas.py` `@docs/especificacion.md`
+
+```text
+Actúa como QA. Antes de implementar la lógica, revisa @tasks/schemas.py contra
+los criterios CA-01..CA-07 de @docs/especificacion.md. No leas el código y
+supongas: instancia TaskCreate con casos límite y reporta cuáles se aceptan y
+cuáles se rechazan. Incluye al menos: título de solo espacios, título con
+espacios alrededor, 2/3/120/121 caracteres, prioridad 0/6/true/2.0/"3".
+Para cada caso que contradiga la especificación, di qué criterio rompe y
+propón el cambio mínimo. Si todo cumple, dilo; no inventes hallazgos.
+```
+
+**Resultado:** dos hallazgos reales, confirmados ejecutando el schema:
+
+| Caso | Antes | Criterio roto | Corrección |
+|------|-------|---------------|------------|
+| `title="   "` (3 espacios) | **Aceptado** (mide 3) | CA-03 | `StringConstraints(strip_whitespace=True, ...)`: recorta antes de medir |
+| `priority=true` | **Aceptado como `1`** (modo flexible de Pydantic) | CA-04 | `StrictInt`: rechaza `true`, `2.0` y `"3"` en lugar de convertirlos |
+
+Después de la corrección: los 6 casos inválidos se rechazan y
+`"  Revisar backups  "` se guarda recortado como `"Revisar backups"`.
+
+**Ajuste derivado:** el docstring de `create_task` decía que el servicio
+validaba el título vacío. Como ahora lo hace el schema, se corrigió para no
+documentar algo falso. Los dos `ruff` (orden de imports y una línea de 103
+caracteres) se arreglaron antes del commit.
+
+**Lección:** revisar el esqueleto antes de escribir la lógica atrapó dos bugs
+cuyo costo fue cambiar 2 líneas. Si se hubieran descubierto con los tests
+de integración, habría que haber depurado a través de 3 capas.
+
+**Decisión:** ajustado (2 hallazgos corregidos).

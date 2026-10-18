@@ -29,3 +29,15 @@ def already_exists(resource: str, identifier: object) -> HTTPException:
         status_code=status.HTTP_409_CONFLICT,
         detail=f"{resource} ya existe: {identifier}",
     )
+
+
+def conflict(message: str) -> HTTPException:
+    """409 — la petición choca con el estado actual del recurso.
+
+    Para conflictos que no son "ya existe": reutilizar una llave de idempotencia
+    con otro cuerpo, o una transición de estado no permitida.
+    """
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=message,
+    )
