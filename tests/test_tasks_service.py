@@ -16,7 +16,8 @@ from tasks import clock, repository, service
 from tasks.schemas import TaskCreate, TaskStatus, TaskStatusUpdate
 from users import service as users_service
 
-NOON = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
+UTC = timezone.utc
+NOON = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -167,3 +168,37 @@ def test_clock_today_se_deriva_de_now(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(clock, "now", lambda: datetime(2026, 12, 31, 23, 59, tzinfo=timezone.utc))
 
     assert clock.today() == date(2026, 12, 31)
+
+
+# --- Bug: "hoy" calculado en UTC (ver docs/prompts.md, P-17 a P-19) -------------------
+
+
+@pytest.mark.parametrize(
+    ("utc_instant", "expected_local_day"),
+    [
+        pytest.param(datetime(2026, 10, 19, 1, 0, tzinfo=UTC), date(2026, 10, 18), id="19h"),
+        pytest.param(datetime(2026, 10, 19, 5, 59, tzinfo=UTC), date(2026, 10, 18), id="23h59"),
+        pytest.param(datetime(2026, 10, 19, 6, 0, tzinfo=UTC), date(2026, 10, 19), id="0h"),
+    ],
+)
+def test_clock_today_usa_la_zona_horaria_del_negocio(
+    monkeypatch: pytest.MonkeyPatch, utc_instant: datetime, expected_local_day: date
+) -> None:
+    """Regresión: a las 19:00 en CDMX (01:00 UTC del día siguiente) "hoy" sigue siendo hoy."""
+    monkeypatch.undo()
+    monkeypatch.setattr(clock, "now", lambda: utc_instant)
+
+    assert clock.today() == expected_local_day
+
+
+def test_crear_tarea_para_hoy_en_la_tarde_de_cdmx_es_valido(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regresión del reporte: due_date = hoy, creada a las 19:00 hora de CDMX → se acepta."""
+    monkeypatch.undo()
+    monkeypatch.setattr(clock, "now", lambda: datetime(2026, 10, 19, 1, 0, tzinfo=timezone.utc))
+    data = TaskCreate(title="Cerrar turno", due_date=date(2026, 10, 18))
+
+    task = service.create_task(data)
+
+    assert task.due_date == date(2026, 10, 18)

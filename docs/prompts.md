@@ -32,6 +32,9 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-14 | 2 | Iteración 4 · listado y transiciones (verde) + cobertura | Incremental · modelos inmutables (`model_copy`) | Aceptado |
 | P-15 | 3 | Tests unitarios del servicio con mocks | Separar unitario vs integración · mocks que verifican interacciones | Aceptado |
 | P-16 | 3 | Mutation testing con `mutmut` + verificación del resultado | Desconfiar de un 100 % · reproducir un mutante a mano | Ajustado (config deprecada) |
+| P-17 | 4 | Pruebas exploratorias en busca de bugs | Entradas hostiles · `raise_server_exceptions=False` | Aceptado (sin 500; 1 hallazgo menor) |
+| P-18 | 4 | Bug de zona horaria: hipótesis antes que solución | Síntoma + contexto + esperado · "no cambies código todavía" | Aceptado |
+| P-19 | 4 | Bug de zona horaria: test en rojo → fix mínimo → validación | Reproducir primero · fix mínimo · validar con la suite | Aceptado |
 
 ---
 
@@ -633,3 +636,123 @@ esas decisiones, los mutantes `<=`, de mensajes y de orden habrían sobrevivido,
 aunque la cobertura de líneas ya era del 100 %.
 
 **Decisión:** ajustado (configuración) y aceptado.
+
+---
+
+## P-17 · Pruebas exploratorias en busca de bugs
+
+**Fase:** 4 · Debugging
+**Técnica:** entradas hostiles · cliente que **no** relanza excepciones del
+servidor (`raise_server_exceptions=False`) para ver el 500 que vería un cliente
+real
+**Contexto:** `@tasks/` `@main.py`
+
+```text
+La suite está al 100 %, pero solo prueba lo que yo imaginé. Haz pruebas
+exploratorias contra la API con TestClient(app, raise_server_exceptions=False)
+y entradas hostiles: ids 0, negativos y enormes; fechas 0001-01-01 y 9999-12-31;
+campos extra; caracteres de control en el título; cuerpo que es una lista;
+Idempotency-Key de solo espacios; PATCH con campos extra.
+Reporta en una tabla: entrada, código, cuerpo. Marca cualquier 500 o respuesta
+que contradiga @docs/especificacion.md. Después revisa @tasks/clock.py y dime
+si "hoy" puede ser distinto para el usuario y para el servidor.
+```
+
+**Resultado:** 14 casos, **ningún 500**. Hallazgos:
+
+| Hallazgo | Severidad | Decisión |
+|----------|-----------|----------|
+| `Idempotency-Key: "   "` (solo espacios) se acepta como llave válida | Menor | Corregir en la revisión de código (P-21) |
+| Campos extra en el cuerpo se ignoran en silencio | Falso positivo | Es el mismo comportamiento que `users` (consistencia con el repo base) |
+| `clock.today()` toma la fecha **UTC** | **Mayor** | Investigar con hipótesis (P-18) |
+
+---
+
+## P-18 · Bug de zona horaria: hipótesis antes que solución
+
+**Fase:** 4 · Debugging
+**Técnica:** los tres ingredientes de la Clase 3 (síntoma, contexto y comportamiento
+esperado) · **"no cambies código todavía"** · hipótesis ordenadas por probabilidad,
+cada una con su forma de confirmarla
+**Contexto:** `@tasks/clock.py` `@tasks/service.py` `@tests/conftest.py`
+
+```text
+<síntoma>
+Un usuario en Ciudad de México crea a las 19:00 hora local una tarea con
+due_date igual a la fecha de hoy y recibe:
+422 {"detail": "La fecha límite no puede estar en el pasado"}
+A las 10:00 la misma petición funciona.
+</síntoma>
+<contexto>
+El servidor corre en UTC. La suite pasa al 100 % porque el conftest fija
+clock.today() en 2026-10-18. Reproducción: clock.now() = 2026-10-19T01:00Z
+(= 18-oct 19:00 en CDMX) → clock.today() devuelve 2026-10-19.
+</contexto>
+<esperado>
+CA-06: "hoy" se permite. Para el usuario, hoy es 18 de octubre hasta su
+medianoche local.
+</esperado>
+NO cambies código todavía. Dame 2-3 hipótesis de la causa, de más a menos
+probable, y para cada una qué evidencia la apoya o la descarta y cómo
+confirmarla.
+```
+
+**Hipótesis propuestas por la IA:**
+
+| # | Hipótesis | Evidencia | Cómo confirmarla | Resultado |
+|---|-----------|-----------|------------------|-----------|
+| 1 | `today()` deriva la fecha de un instante **UTC**; para UTC-6, desde las 18:00 locales UTC ya es el día siguiente | Explica por qué falla de noche y no de mañana | Calcular `today()` con `now()` = 01:00Z | **Confirmada**: devuelve `2026-10-19` |
+| 2 | Off-by-one en la comparación (`<` vs `<=`) | Fallaría a cualquier hora | El test CA-06 (frontera "hoy") pasa | Descartada |
+| 3 | El cliente manda la fecha con zona horaria y Pydantic la desplaza | Posible con `datetime`, no con `date` | El campo es `date`; llega `2026-10-18` intacto al servicio | Descartada |
+
+**Por qué la suite no lo vio:** el fixture que fija el reloj **reemplaza
+justamente la función que tenía el bug**. Era la elección correcta para probar el
+resto de forma determinista, pero dejó `today()` sin probar con instantes reales
+en las fronteras de día.
+
+---
+
+## P-19 · Bug de zona horaria: test en rojo → fix mínimo → validación
+
+**Fase:** 4 · Debugging
+**Técnica:** reproducir con un test **antes** de arreglar · fix mínimo · validar
+con la suite completa y con la reproducción original
+**Contexto:** `@tasks/clock.py` `@tests/test_tasks_service.py`
+
+```text
+Hipótesis 1 confirmada. En este orden:
+1. Escribe en @tests/test_tasks_service.py un test de regresión que reproduzca
+   el bug y FALLE: clock.today() con instantes UTC que en CDMX son 19:00, 23:59
+   y 00:00 del día siguiente; y create_task con due_date = hoy a las 19:00 CDMX.
+   Córrelo y muéstrame el traceback.
+2. Fix mínimo en @tasks/clock.py: now() se queda en UTC (son instantes); today()
+   convierte a la zona horaria del negocio, configurable con la variable de
+   entorno TASKS_TIMEZONE (por defecto America/Mexico_City). Usa zoneinfo y
+   agrega tzdata a requirements.txt para Windows.
+3. Corre la suite completa y la reproducción original.
+```
+
+**Rojo** (`docs/evidencia/bug_tz_rojo.log`): **3 failed** (19:00 y 23:59 devuelven
+el día 19; `create_task` levanta `HTTPException: 422`). El caso 00:00 pasó, como se
+esperaba, porque a esa hora ya es el día siguiente también en CDMX.
+
+**Fix:** `today()` = `now().astimezone(BUSINESS_TIMEZONE).date()`. `now()` sigue en UTC.
+
+**Verde** (`docs/evidencia/bug_tz_verde.log`): **93 passed**; la reproducción original
+devuelve **201** con `due_date = 2026-10-18`.
+
+**Decisiones:**
+
+- **Zona horaria configurable y no fija.** El servidor puede correr en cualquier
+  región; la regla de negocio depende de dónde trabaja el equipo, no de dónde está
+  el servidor.
+- **Las marcas de tiempo siguen en UTC.** Un instante no tiene "día local"; solo
+  la regla de la fecha límite necesita un calendario.
+- **Propuesta rechazada:** cambiar el conftest para no fijar el reloj. Los tests
+  volverían a depender de la hora a la que se corren. En su lugar, los tests de
+  regresión fijan `now()` (el instante) y dejan que `today()` real haga la
+  conversión.
+- `tzdata` se agregó a `requirements.txt`: en Linux y macOS `zoneinfo` usa la base
+  del sistema, pero en Windows no existe sin ese paquete.
+
+**Decisión:** aceptado.
