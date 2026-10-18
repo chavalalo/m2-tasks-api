@@ -28,6 +28,8 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-10 | 3 | Iteración 3 · tests de idempotencia (rojo) | Test-first · contraejemplos explícitos | Aceptado |
 | P-11 | 2 | Iteración 3 · idempotencia (verde) | Incremental · pedir el orden de operaciones razonado | Aceptado |
 | P-12 | 3 | Caso límite de orden: reintento al día siguiente + mutación manual | Pregunta "¿qué pasa si…?" · mutación a mano (Clase 2 M2) | Aceptado |
+| P-13 | 3 | Iteración 4 · tests de listar, filtrar y cambiar estado (rojo) | Test-first · tabla de casos con parametrize · resolver ambigüedades de la especificación | Aceptado |
+| P-14 | 2 | Iteración 4 · listado y transiciones (verde) + cobertura | Incremental · modelos inmutables (`model_copy`) | Aceptado |
 
 ---
 
@@ -457,5 +459,80 @@ código.
 orden ya estaba **cubierto** (todas las líneas se ejecutaban), pero ningún test
 **detectaba** que se invirtiera. Es justo la diferencia entre cobertura y mutation
 testing de la Clase 2.
+
+**Decisión:** aceptado.
+
+---
+
+## P-13 · Iteración 4 — tests de listar, filtrar y cambiar estado (rojo)
+
+**Fase:** 3 · Tests
+**Técnica:** test-first · tabla de casos con `parametrize` · pedir a la IA que
+**señale ambigüedades** de la especificación antes de escribir tests
+**Contexto:** `@docs/especificacion.md` (CA-12 a CA-22) `@tests/test_tasks.py`
+
+```text
+Iteración 4 (test-first): GET /tasks con filtros y PATCH /tasks/{id}/status.
+Primero dime si encuentras ambigüedades o reglas que choquen entre sí en
+CA-12..CA-22; no las resuelvas tú, solo señálalas.
+Después escribe los tests:
+- un helper que siembre 3 tareas con estado, responsable y prioridad
+  distintos, y un parametrize para los filtros (uno por uno, combinados, sin
+  coincidencias) y para los filtros inválidos;
+- un parametrize con TODAS las transiciones permitidas, verificando el
+  historial completo;
+- updated_at y changed_at con el reloj fijado por monkeypatch;
+- mismo estado, done → otro estado, estado inexistente, tarea inexistente, y
+  que el cambio persista al consultar después.
+```
+
+**Ambigüedad que señaló la IA:** CA-19 ("mismo estado → 200") y CA-20 ("desde
+`done` → 409") chocan en el caso **`done → done`**. Se resolvió: **gana CA-19**,
+porque un cliente que reintenta "marcar como terminada" no debe recibir un error.
+Quedó fijado con su propio test
+(`test_change_status_done_a_done_es_idempotente`).
+
+**Resultado:** 23 tests nuevos (con parametrize); **18 failed, 48 passed**
+(`docs/evidencia/it4_rojo.log`). Los que pasaron sin implementar fueron los de
+validación de forma (estado y filtros inválidos → 422, rechazados por el schema
+y por `Query(ge=1, le=5)`) y el 404 de tarea inexistente, que reutiliza
+`get_task`.
+
+---
+
+## P-14 · Iteración 4 — listado y transiciones (verde) + cobertura
+
+**Fase:** 2 · Generación · 3 · Cobertura
+**Técnica:** incremental · usar la tabla `ALLOWED_TRANSITIONS` del esqueleto como
+única fuente de verdad · modelos inmutables
+**Contexto:** `@tasks/service.py` `@tasks/repository.py`
+
+```text
+Haz pasar los tests de la iteración 4:
+- repository.list_all con filtros combinables y orden por id; repository.save.
+- service.list_tasks delega; service.change_status: mismo estado → devolver
+  sin cambios; transición fuera de ALLOWED_TRANSITIONS → errors.conflict con el
+  texto exacto de la especificación; si no, crear una COPIA de la tarea
+  (model_copy) con el nuevo estado, la entrada nueva del historial y
+  updated_at, y guardarla. No mutes el objeto guardado en el repositorio.
+Después corre la cobertura con ramas para tasks, core, users y main, y dime qué
+líneas quedan sin cubrir y si vale la pena cubrirlas.
+```
+
+**Resultado:** **66 passed**. Cobertura de **99 %** en líneas y ramas
+(`docs/evidencia/it4_cobertura.log`): `tasks/service.py` y `tasks/repository.py`
+al 100 %, con todas sus ramas.
+
+**Líneas sin cubrir y decisión:**
+
+| Línea | Por qué no se cubre | Decisión |
+|-------|---------------------|----------|
+| `tasks/clock.py:12` (`today()`) | Los tests siempre la reemplazan con el reloj fijo | Cubrirla con un test unitario del reloj (P-15) |
+| `main.py:18` (`/health`) | Código del repo base sin test | Agregar un test mínimo, porque es barato y mejora el proyecto base |
+
+**Por qué `model_copy` y no mutar:** si `change_status` modificara el objeto que
+devuelve el repositorio, un error a la mitad dejaría una tarea guardada a medias
+(por ejemplo, con el estado nuevo pero sin entrada en el historial). Con la copia,
+el repositorio solo cambia en el `save()` final.
 
 **Decisión:** aceptado.

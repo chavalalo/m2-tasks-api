@@ -37,12 +37,20 @@ def list_all(
     priority: int | None = None,
 ) -> list[Task]:
     """Tareas que cumplen todos los filtros dados, ordenadas por `id`."""
-    raise NotImplementedError
+    tasks = sorted(_tasks.values(), key=lambda task: task.id)
+    if status is not None:
+        tasks = [task for task in tasks if task.status == status]
+    if assignee_id is not None:
+        tasks = [task for task in tasks if task.assignee_id == assignee_id]
+    if priority is not None:
+        tasks = [task for task in tasks if task.priority == priority]
+    return tasks
 
 
 def save(task: Task) -> Task:
     """Reemplaza una tarea existente (cambios de estado)."""
-    raise NotImplementedError
+    _tasks[task.id] = task
+    return task
 
 
 def find_by_idempotency_key(key: str) -> tuple[str, int] | None:

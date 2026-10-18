@@ -91,7 +91,7 @@ def list_tasks(
     priority: int | None = None,
 ) -> list[Task]:
     """Tareas que cumplen los filtros, ordenadas por `id` (CA-12…CA-14)."""
-    raise NotImplementedError
+    return repository.list_all(status=status, assignee_id=assignee_id, priority=priority)
 
 
 def change_status(task_id: int, data: TaskStatusUpdate) -> Task:
@@ -101,4 +101,22 @@ def change_status(task_id: int, data: TaskStatusUpdate) -> Task:
     - Transición no permitida: 409 (CA-20).
     - Tarea inexistente: 404 (CA-22).
     """
-    raise NotImplementedError
+    task = get_task(task_id)
+    if data.status == task.status:
+        return task
+    if data.status not in ALLOWED_TRANSITIONS[task.status]:
+        raise errors.conflict(
+            f"Transición de estado no permitida: {task.status.value} → {data.status.value}"
+        )
+    changed_at = clock.now()
+    updated = task.model_copy(
+        update={
+            "status": data.status,
+            "status_history": [
+                *task.status_history,
+                StatusChange(status=data.status, changed_at=changed_at),
+            ],
+            "updated_at": changed_at,
+        }
+    )
+    return repository.save(updated)

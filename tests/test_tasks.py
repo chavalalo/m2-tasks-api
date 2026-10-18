@@ -3,7 +3,7 @@
 Mismo estilo que tests/test_users.py: un caso por test, arrange / act / assert
 separados por una línea en blanco. Cada test menciona el criterio CA-xx que cubre.
 """
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -300,3 +300,166 @@ def test_reintento_al_dia_siguiente_devuelve_la_original_aunque_la_fecha_ya_paso
 
     assert retry.status_code == 201
     assert retry.json()["id"] == first.json()["id"]
+
+
+# --- GET /tasks · listar y filtrar ------------------------------------------------
+
+
+def _seed_tasks(client: TestClient) -> None:
+    """Tres tareas con estados, responsables y prioridades distintas."""
+    _create(client, title="Tarea uno", priority=1, assignee_id=1)
+    _create(client, title="Tarea dos", priority=5, assignee_id=2)
+    third = _create(client, title="Tarea tres", priority=5, assignee_id=1)
+    client.patch(f"/tasks/{third['id']}/status", json={"status": "in_progress"})
+
+
+def test_list_tasks_sin_tareas_devuelve_lista_vacia(client: TestClient) -> None:
+    """CA-12."""
+    response = client.get("/tasks")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_tasks_ordenadas_por_id(client: TestClient) -> None:
+    """CA-13."""
+    _seed_tasks(client)
+
+    response = client.get("/tasks")
+
+    assert response.status_code == 200
+    assert [t["id"] for t in response.json()] == [1, 2, 3]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_ids"),
+    [
+        pytest.param("status=pending", [1, 2], id="por-estado"),
+        pytest.param("assignee_id=1", [1, 3], id="por-responsable"),
+        pytest.param("priority=5", [2, 3], id="por-prioridad"),
+        pytest.param("priority=5&assignee_id=1", [3], id="combinados"),
+        pytest.param("status=done", [], id="sin-coincidencias"),
+    ],
+)
+def test_list_tasks_con_filtros(client: TestClient, query: str, expected_ids: list[int]) -> None:
+    """CA-14."""
+    _seed_tasks(client)
+
+    response = client.get(f"/tasks?{query}")
+
+    assert response.status_code == 200
+    assert [t["id"] for t in response.json()] == expected_ids
+
+
+@pytest.mark.parametrize("query", ["status=archived", "priority=9", "priority=0", "assignee_id=x"])
+def test_list_tasks_filtro_invalido_devuelve_422(client: TestClient, query: str) -> None:
+    """CA-15."""
+    response = client.get(f"/tasks?{query}")
+
+    assert response.status_code == 422
+
+
+# --- PATCH /tasks/{task_id}/status -----------------------------------------------
+
+
+def _change(client: TestClient, task_id: int, status: str):
+    return client.patch(f"/tasks/{task_id}/status", json={"status": status})
+
+
+@pytest.mark.parametrize(
+    ("path", "final"),
+    [
+        pytest.param(["in_progress"], "in_progress", id="pending-a-in_progress"),
+        pytest.param(["done"], "done", id="pending-a-done"),
+        pytest.param(["in_progress", "done"], "done", id="in_progress-a-done"),
+        pytest.param(["in_progress", "pending"], "pending", id="in_progress-a-pending"),
+    ],
+)
+def test_change_status_transiciones_permitidas(
+    client: TestClient, path: list[str], final: str
+) -> None:
+    """CA-18: cada transición queda en el historial."""
+    task = _create(client)
+
+    for status in path:
+        response = _change(client, task["id"], status)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == final
+    assert [h["status"] for h in body["status_history"]] == ["pending", *path]
+    assert body["updated_at"] >= body["created_at"]
+
+
+def test_change_status_actualiza_updated_at(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CA-18: `updated_at` y la entrada del historial usan el momento del cambio."""
+    task = _create(client)
+    later = datetime(2026, 10, 18, 15, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(clock, "now", lambda: later)
+
+    body = _change(client, task["id"], "in_progress").json()
+
+    assert body["updated_at"] == "2026-10-18T15:30:00Z"
+    assert body["status_history"][-1]["changed_at"] == "2026-10-18T15:30:00Z"
+    assert body["created_at"] != body["updated_at"]
+
+
+def test_change_status_al_mismo_estado_no_cambia_nada(client: TestClient) -> None:
+    """CA-19: operación idempotente."""
+    task = _create(client)
+
+    response = _change(client, task["id"], "pending")
+
+    assert response.status_code == 200
+    assert response.json() == task
+
+
+@pytest.mark.parametrize("target", ["pending", "in_progress"])
+def test_change_status_desde_done_devuelve_409(client: TestClient, target: str) -> None:
+    """CA-20: `done` es un estado final."""
+    task = _create(client)
+    _change(client, task["id"], "done")
+
+    response = _change(client, task["id"], target)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == f"Transición de estado no permitida: done → {target}"
+
+
+def test_change_status_done_a_done_es_idempotente(client: TestClient) -> None:
+    """CA-19 tiene prioridad sobre CA-20: mismo estado → 200 aunque sea `done`."""
+    task = _create(client)
+    done = _change(client, task["id"], "done").json()
+
+    response = _change(client, task["id"], "done")
+
+    assert response.status_code == 200
+    assert response.json() == done
+
+
+def test_change_status_estado_inexistente_devuelve_422(client: TestClient) -> None:
+    """CA-21."""
+    task = _create(client)
+
+    response = _change(client, task["id"], "archived")
+
+    assert response.status_code == 422
+
+
+def test_change_status_tarea_inexistente_devuelve_404(client: TestClient) -> None:
+    """CA-22."""
+    response = _change(client, 999, "done")
+
+    assert response.status_code == 404
+
+
+def test_change_status_persiste_el_cambio(client: TestClient) -> None:
+    """CA-18: el cambio se ve al consultar la tarea después."""
+    task = _create(client)
+    _change(client, task["id"], "in_progress")
+
+    response = client.get(f"/tasks/{task['id']}")
+
+    assert response.json()["status"] == "in_progress"

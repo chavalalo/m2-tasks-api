@@ -1,0 +1,19 @@
+FAILED tests/test_tasks.py::test_list_tasks_sin_tareas_devuelve_lista_vacia
+FAILED tests/test_tasks.py::test_list_tasks_ordenadas_por_id
+FAILED tests/test_tasks.py::test_list_tasks_con_filtros[por-estado]
+FAILED tests/test_tasks.py::test_list_tasks_con_filtros[por-responsable]
+FAILED tests/test_tasks.py::test_list_tasks_con_filtros[por-prioridad]
+FAILED tests/test_tasks.py::test_list_tasks_con_filtros[combinados]
+FAILED tests/test_tasks.py::test_list_tasks_con_filtros[sin-coincidencias]
+FAILED tests/test_tasks.py::test_change_status_transiciones_permitidas[pending-a-in_progress]
+FAILED tests/test_tasks.py::test_change_status_transiciones_permitidas[pending-a-done]
+FAILED tests/test_tasks.py::test_change_status_transiciones_permitidas[in_progress-a-done]
+FAILED tests/test_tasks.py::test_change_status_transiciones_permitidas[in_progress-a-pending]
+FAILED tests/test_tasks.py::test_change_status_actualiza_updated_at
+FAILED tests/test_tasks.py::test_change_status_al_mismo_estado_no_cambia_nada
+FAILED tests/test_tasks.py::test_change_status_desde_done_devuelve_409[pending]
+FAILED tests/test_tasks.py::test_change_status_desde_done_devuelve_409[in_progress]
+FAILED tests/test_tasks.py::test_change_status_done_a_done_es_idempotente
+FAILED tests/test_tasks.py::test_change_status_tarea_inexistente_devuelve_404
+FAILED tests/test_tasks.py::test_change_status_persiste_el_cambio
+18 failed, 48 passed in 7.99s
