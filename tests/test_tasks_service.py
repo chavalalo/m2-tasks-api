@@ -5,6 +5,7 @@ servicio directamente y se reemplazan sus dependencias con mocks: el reloj y
 `users.service.user_exists`. Así se verifica no solo QUÉ devuelve el servicio,
 sino también CON QUIÉN habla y en qué orden.
 """
+import time
 from datetime import date, datetime, timezone
 from itertools import product
 from unittest.mock import MagicMock
@@ -202,3 +203,22 @@ def test_crear_tarea_para_hoy_en_la_tarde_de_cdmx_es_valido(
     task = service.create_task(data)
 
     assert task.due_date == date(2026, 10, 18)
+
+
+@pytest.mark.parametrize("server_tz", ["UTC", "Asia/Tokyo"])
+def test_clock_today_no_depende_de_la_zona_horaria_del_servidor(
+    monkeypatch: pytest.MonkeyPatch, server_tz: str
+) -> None:
+    """Hallado con mutmut: si la máquina de pruebas ya está en CDMX, usar la zona local
+    del servidor pasaba los tests por casualidad. Se fuerza un servidor en otra zona."""
+    monkeypatch.undo()
+    monkeypatch.setenv("TZ", server_tz)
+    time.tzset()
+    monkeypatch.setattr(clock, "now", lambda: datetime(2026, 10, 19, 1, 0, tzinfo=UTC))
+    try:
+        result = clock.today()
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+    assert result == date(2026, 10, 18)
