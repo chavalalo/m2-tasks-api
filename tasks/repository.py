@@ -6,20 +6,28 @@ También guarda las llaves de idempotencia ya usadas.
 """
 from tasks.schemas import Task, TaskStatus
 
-
-def add(task: Task) -> Task:
-    """Guarda una tarea nueva (el servicio ya le asignó `id`)."""
-    raise NotImplementedError
+_tasks: dict[int, Task] = {}
+_idempotency_keys: dict[str, tuple[str, int]] = {}
+_next_id: int = 1
 
 
 def next_id() -> int:
     """Devuelve el siguiente `id` disponible y lo reserva."""
-    raise NotImplementedError
+    global _next_id
+    task_id = _next_id
+    _next_id += 1
+    return task_id
+
+
+def add(task: Task) -> Task:
+    """Guarda una tarea nueva (el servicio ya le asignó `id`)."""
+    _tasks[task.id] = task
+    return task
 
 
 def get(task_id: int) -> Task | None:
     """Tarea por `id`, o `None` si no existe."""
-    raise NotImplementedError
+    return _tasks.get(task_id)
 
 
 def list_all(
@@ -49,4 +57,7 @@ def remember_idempotency_key(key: str, fingerprint: str, task_id: int) -> None:
 
 def reset() -> None:
     """Vacía el almacén y las llaves de idempotencia. Se usa entre tests."""
-    raise NotImplementedError
+    global _next_id
+    _tasks.clear()
+    _idempotency_keys.clear()
+    _next_id = 1

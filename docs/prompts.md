@@ -21,6 +21,8 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-03 | 1 | Actualizar `CLAUDE.md` para el recurso nuevo | Contexto persistente, restricciones explícitas | Aceptado |
 | P-04 | 2 | Esqueleto del recurso (firmas + docstrings, sin lógica) | Skeleton-first · referencia a patrón existente con `@archivo` | Aceptado |
 | P-05 | 2 | Revisar el esqueleto contra la especificación | Rol revisor · verificación ejecutable · anti-complacencia | Ajustado (2 hallazgos) |
+| P-06 | 2–3 | Iteración 1 · tests de crear y consultar (rojo) | Test-first · few-shot de estilo con `@tests/test_users.py` | Aceptado |
+| P-07 | 2 | Iteración 1 · implementación mínima (verde) | Incremental · "lo mínimo para pasar" | Aceptado |
 
 ---
 
@@ -220,3 +222,64 @@ cuyo costo fue cambiar 2 líneas. Si se hubieran descubierto con los tests
 de integración, habría que haber depurado a través de 3 capas.
 
 **Decisión:** ajustado (2 hallazgos corregidos).
+
+---
+
+## P-06 · Iteración 1 — tests primero: crear y consultar (rojo)
+
+**Fase:** 2–3 · Generación + tests
+**Técnica:** test-first (TDD) · few-shot de estilo (los tests de `users` como
+ejemplo) · un criterio por test
+**Contexto:** `@docs/especificacion.md` `@tests/test_users.py` `@tests/conftest.py`
+`@tasks/clock.py`
+
+```text
+Iteración 1 (test-first). Escribe SOLO tests, no implementes nada.
+1. En @tests/conftest.py agrega: el reset del almacén de tasks entre tests, y un
+   fixture autouse que fije tasks.clock.today() en date(2026, 10, 18) con
+   monkeypatch (ningún test debe depender del día real).
+2. Crea tests/test_tasks.py con el MISMO estilo que @tests/test_users.py
+   (nombre en español, arrange/act/assert separados por línea en blanco) para:
+   CA-01 (solo título → defaults), CA-02 (todos los campos, responsable = usuario
+   semilla 2), recorte de espacios del título, ids consecutivos, CA-16 y CA-17.
+   Cada test lleva en su docstring el CA que cubre.
+3. Corre pytest y muéstrame que fallan por NotImplementedError (no por errores de
+   import o de sintaxis).
+```
+
+**Resultado:** 6 tests nuevos; la suite completa en **rojo** (12 errores), incluidos los
+6 de `users`, porque el fixture llama a `tasks.repository.reset()`, que todavía
+era un esqueleto. Evidencia: `docs/evidencia/it1_rojo.log`.
+
+**Lectura del rojo:** que fallaran los tests de `users` no era una regresión. Era
+la confirmación de que el fixture nuevo sí se ejecuta en toda la suite.
+
+---
+
+## P-07 · Iteración 1 — implementación mínima (verde)
+
+**Fase:** 2 · Generación de código
+**Técnica:** incremental · "el mínimo código que pone en verde estos tests" ·
+dejar el resto como `NotImplementedError`
+**Contexto:** `@tasks/service.py` `@tasks/repository.py` `@tasks/clock.py`
+`@users/repository.py`
+
+```text
+Implementa lo MÍNIMO para que pasen los tests de la iteración 1:
+- tasks/clock.py: today() y now() en UTC (today se deriva de now).
+- tasks/repository.py: next_id, add, get y reset, imitando @users/repository.py.
+  Deja list_all, save y las funciones de idempotencia con NotImplementedError.
+- tasks/service.py: create_task (sin validaciones de dominio ni idempotencia
+  todavía; vienen en la iteración 2 y 3) y get_task con errors.not_found.
+created_at, updated_at y la primera entrada de status_history deben usar el
+MISMO instante (una sola llamada a clock.now()).
+Corre pytest y ruff check .
+```
+
+**Resultado:** **12 passed**, `ruff` limpio. Evidencia: `docs/evidencia/it1_verde.log`.
+
+**Detalle revisado:** usar una sola llamada a `clock.now()` hace que
+`created_at == updated_at` en una tarea nueva. El test CA-01 lo verifica; con dos
+llamadas, la prueba habría fallado de forma intermitente por microsegundos.
+
+**Decisión:** aceptado.
