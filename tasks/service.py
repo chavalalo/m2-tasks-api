@@ -7,6 +7,7 @@ nunca del repositorio de usuarios.
 from core import errors
 from tasks import clock, repository
 from tasks.schemas import StatusChange, Task, TaskCreate, TaskStatus, TaskStatusUpdate
+from users import service as users_service
 
 # Transiciones permitidas: estado actual -> estados a los que puede pasar.
 ALLOWED_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
@@ -25,6 +26,7 @@ def create_task(data: TaskCreate, idempotency_key: str | None = None) -> Task:
       - 409 si `idempotency_key` ya se usó con otro cuerpo (CA-09).
     Si la llave ya se usó con el mismo cuerpo, devuelve la tarea original (CA-08).
     """
+    _validate_new_task(data)
     created_at = clock.now()
     task = Task(
         id=repository.next_id(),
@@ -39,6 +41,14 @@ def create_task(data: TaskCreate, idempotency_key: str | None = None) -> Task:
         updated_at=created_at,
     )
     return repository.add(task)
+
+
+def _validate_new_task(data: TaskCreate) -> None:
+    """Reglas de dominio de una tarea nueva. Se validan ANTES de reservar un `id`."""
+    if data.due_date is not None and data.due_date < clock.today():
+        raise errors.invalid_request("La fecha límite no puede estar en el pasado")
+    if data.assignee_id is not None and not users_service.user_exists(data.assignee_id):
+        raise errors.invalid_request(f"El responsable no existe: {data.assignee_id}")
 
 
 def get_task(task_id: int) -> Task:

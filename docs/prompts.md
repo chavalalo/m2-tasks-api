@@ -23,6 +23,8 @@ raíz del repo, para que lea `CLAUDE.md` automáticamente).
 | P-05 | 2 | Revisar el esqueleto contra la especificación | Rol revisor · verificación ejecutable · anti-complacencia | Ajustado (2 hallazgos) |
 | P-06 | 2–3 | Iteración 1 · tests de crear y consultar (rojo) | Test-first · few-shot de estilo con `@tests/test_users.py` | Aceptado |
 | P-07 | 2 | Iteración 1 · implementación mínima (verde) | Incremental · "lo mínimo para pasar" | Aceptado |
+| P-08 | 3 | Iteración 2 · tests de validaciones y fronteras (rojo) | Test-first · enumerar clases de casos · parametrize | Aceptado |
+| P-09 | 2 | Iteración 2 · validaciones de dominio (verde) | Incremental · restricción de orden ("validar antes de reservar id") | Aceptado |
 
 ---
 
@@ -281,5 +283,74 @@ Corre pytest y ruff check .
 **Detalle revisado:** usar una sola llamada a `clock.now()` hace que
 `created_at == updated_at` en una tarea nueva. El test CA-01 lo verifica; con dos
 llamadas, la prueba habría fallado de forma intermitente por microsegundos.
+
+**Decisión:** aceptado.
+
+---
+
+## P-08 · Iteración 2 — tests de validaciones y fronteras (rojo)
+
+**Fase:** 3 · Tests
+**Técnica:** test-first · **enumerar las clases de casos** (técnica de la Clase 2 de
+M1 para generar tests: camino feliz, cada rama, fronteras, entradas inválidas) ·
+`parametrize` con `id` legible
+**Contexto:** `@docs/especificacion.md` `@tests/test_tasks.py` `@tests/conftest.py`
+
+```text
+Iteración 2 (test-first). Agrega a @tests/test_tasks.py tests para CA-03 a CA-07.
+Enumera explícitamente estas clases de casos; no te quedes en el camino feliz:
+- Título: vacío, solo espacios, 2 caracteres, 2 tras recortar, 121, no-texto,
+  null, ausente; y las fronteras válidas 3 y 120.
+- Prioridad: 0, 6, -1, 2.5, true, "3"; y las fronteras válidas 1 y 5.
+- Fecha: ayer (422 con el detail exacto), HOY (201, frontera), formato no ISO.
+  Recuerda que el reloj está fijo en 2026-10-18 por el fixture.
+- Responsable inexistente (422 con el detail exacto).
+- Una petición rechazada no debe crear tarea ni consumir un id.
+Usa pytest.mark.parametrize con ids legibles para cada familia. Corre pytest y
+dime cuáles fallan y por qué; antes de correrlo, predice cuáles van a fallar.
+```
+
+**Predicción antes de correr:** fallarían solo los de **dominio** (fecha pasada,
+responsable inexistente, no consumir id); los de **forma** (título, prioridad,
+formato de fecha) deberían pasar ya, gracias a la corrección del schema en P-05.
+
+**Resultado:** 29 tests nuevos (con parametrize); **3 failed, 32 passed**, tal como
+se predijo (`docs/evidencia/it2_rojo.log`). La predicción confirma que el schema y
+el servicio reparten bien las responsabilidades (forma vs. dominio).
+
+---
+
+## P-09 · Iteración 2 — validaciones de dominio (verde)
+
+**Fase:** 2 · Generación
+**Técnica:** incremental · restricción de orden explícita · reutilizar en lugar de
+duplicar
+**Contexto:** `@tasks/service.py` `@users/service.py` `@core/errors.py` `@CLAUDE.md`
+
+```text
+Haz pasar los 3 tests en rojo de la iteración 2:
+- En tasks/service.py, una función privada _validate_new_task(data) con las dos
+  reglas de dominio (fecha < clock.today() → invalid_request con el texto de la
+  especificación; responsable inexistente → invalid_request).
+- Las validaciones van ANTES de pedir un id al repositorio (hay un test que lo
+  exige).
+- Para saber si el responsable existe NO importes users.repository (lo prohíbe
+  @CLAUDE.md). Agrega a @users/service.py una función pública user_exists(user_id)
+  -> bool sin cambiar nada de lo que ya existe, y úsala.
+Corre pytest completo (los tests de users deben seguir verdes) y ruff.
+```
+
+**Resultado:** **35 passed** (`docs/evidencia/it2_verde.log`), `ruff` limpio.
+
+**Decisiones revisadas:**
+
+- **`user_exists()` en vez de capturar la excepción de `get_user()`.** Alternativa
+  considerada: llamar a `users_service.get_user()` y atrapar el 404. Se descartó
+  porque usaría una excepción HTTP como control de flujo entre servicios, y un
+  404 de *usuario* se podía filtrar como respuesta de *tarea*.
+- **`users/service.py` solo ganó una función nueva.** Ningún comportamiento de
+  `users` cambió: sus 6 tests siguen verdes (integración sin conflictos).
+- `ruff --fix` reordenó un import (`users` después de `tasks`, por orden
+  alfabético).
 
 **Decisión:** aceptado.

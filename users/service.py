@@ -16,6 +16,11 @@ def get_user(user_id: int) -> User:
     return user
 
 
+def user_exists(user_id: int) -> bool:
+    """Indica si existe un usuario con ese `id`. Lo usan otros recursos (p. ej. `tasks`)."""
+    return repository.get(user_id) is not None
+
+
 def list_users() -> list[User]:
     return repository.list_all()
 
