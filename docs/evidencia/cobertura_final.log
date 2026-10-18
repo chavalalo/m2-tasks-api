@@ -1,0 +1,21 @@
+
+Name                  Stmts   Miss Branch BrPart  Cover   Missing
+-----------------------------------------------------------------
+core/__init__.py          0      0      0      0   100%
+core/errors.py            9      0      0      0   100%
+main.py                   9      0      0      0   100%
+tasks/__init__.py         0      0      0      0   100%
+tasks/clock.py            5      0      0      0   100%
+tasks/repository.py      33      0      6      0   100%
+tasks/routes.py          16      0      0      0   100%
+tasks/schemas.py         32      0      0      0   100%
+tasks/service.py         47      0     18      0   100%
+users/__init__.py         0      0      0      0   100%
+users/repository.py      23      0      2      0   100%
+users/routes.py          13      0      0      0   100%
+users/schemas.py          9      0      0      0   100%
+users/service.py         16      0      4      0   100%
+-----------------------------------------------------------------
+TOTAL                   212      0     30      0   100%
+Required test coverage of 90% reached. Total coverage: 100.00%
+89 passed in 1.07s

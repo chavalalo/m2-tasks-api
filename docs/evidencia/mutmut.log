@@ -1,0 +1,39 @@
+# mutmut run sobre tasks/ — 2026-10-18
+Mutantes generados: 125 (6 archivos)
+Resumen por estado:
+    125 killed
+
+Mutantes por módulo:
+      1     tasks.clock
+     26     tasks.repository
+     98     tasks.service
+
+Ejemplos (mutmut show):
+# tasks.service.x__validate_new_task__mutmut_1: killed
+--- tasks/service.py
++++ tasks/service.py
+@@ -1,6 +1,6 @@
+ def _validate_new_task(data: TaskCreate) -> None:
+     """Reglas de dominio de una tarea nueva. Se validan ANTES de reservar un `id`."""
+-    if data.due_date is not None and data.due_date < clock.today():
++    if data.due_date is not None or data.due_date < clock.today():
+         raise errors.invalid_request("La fecha límite no puede estar en el pasado")
+     if data.assignee_id is not None and not users_service.user_exists(data.assignee_id):
+         raise errors.invalid_request(f"El responsable no existe: {data.assignee_id}")
+
+# tasks.service.x__validate_new_task__mutmut_3: killed
+--- tasks/service.py
++++ tasks/service.py
+@@ -1,6 +1,6 @@
+ def _validate_new_task(data: TaskCreate) -> None:
+     """Reglas de dominio de una tarea nueva. Se validan ANTES de reservar un `id`."""
+-    if data.due_date is not None and data.due_date < clock.today():
++    if data.due_date is not None and data.due_date <= clock.today():
+         raise errors.invalid_request("La fecha límite no puede estar en el pasado")
+     if data.assignee_id is not None and not users_service.user_exists(data.assignee_id):
+         raise errors.invalid_request(f"El responsable no existe: {data.assignee_id}")
+
+Verificación manual del mutante de frontera (< → <=):
+FAILED test_create_task_fecha_de_hoy_es_valida
+FAILED test_reintento_al_dia_siguiente_devuelve_la_original_aunque_la_fecha_ya_paso
+2 failed, 87 passed

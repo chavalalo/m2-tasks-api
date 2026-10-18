@@ -7,11 +7,15 @@ proyecto. No usar `HTTPException` directamente en las rutas.
 from fastapi import HTTPException, status
 
 
-def not_found(resource: str, identifier: object) -> HTTPException:
-    """404 — el recurso pedido no existe."""
+def not_found(resource: str, identifier: object, *, feminine: bool = False) -> HTTPException:
+    """404 — el recurso pedido no existe.
+
+    `feminine=True` concuerda el mensaje con recursos femeninos ("tarea no encontrada").
+    """
+    found = "encontrada" if feminine else "encontrado"
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"{resource} no encontrado: {identifier}",
+        detail=f"{resource} no {found}: {identifier}",
     )
 
 
@@ -28,4 +32,16 @@ def already_exists(resource: str, identifier: object) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=f"{resource} ya existe: {identifier}",
+    )
+
+
+def conflict(message: str) -> HTTPException:
+    """409 — la petición choca con el estado actual del recurso.
+
+    Para conflictos que no son "ya existe": reutilizar una llave de idempotencia
+    con otro cuerpo, o una transición de estado no permitida.
+    """
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=message,
     )

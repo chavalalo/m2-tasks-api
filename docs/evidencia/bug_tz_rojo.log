@@ -1,0 +1,27 @@
+=================================== FAILURES ===================================
+____________ test_clock_today_usa_la_zona_horaria_del_negocio[19h] _____________
+tests/test_tasks_service.py:191: in test_clock_today_usa_la_zona_horaria_del_negocio
+    assert clock.today() == expected_local_day
+E   assert datetime.date(2026, 10, 19) == datetime.date(2026, 10, 18)
+E    +  where datetime.date(2026, 10, 19) = <function today at 0x7fb089e5e8e0>()
+E    +    where <function today at 0x7fb089e5e8e0> = clock.today
+___________ test_clock_today_usa_la_zona_horaria_del_negocio[23h59] ____________
+tests/test_tasks_service.py:191: in test_clock_today_usa_la_zona_horaria_del_negocio
+    assert clock.today() == expected_local_day
+E   assert datetime.date(2026, 10, 19) == datetime.date(2026, 10, 18)
+E    +  where datetime.date(2026, 10, 19) = <function today at 0x7fb089e5e8e0>()
+E    +    where <function today at 0x7fb089e5e8e0> = clock.today
+___________ test_crear_tarea_para_hoy_en_la_tarde_de_cdmx_es_valido ____________
+tests/test_tasks_service.py:202: in test_crear_tarea_para_hoy_en_la_tarde_de_cdmx_es_valido
+    task = service.create_task(data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+tasks/service.py:37: in create_task
+    _validate_new_task(data)
+tasks/service.py:74: in _validate_new_task
+    raise errors.invalid_request("La fecha límite no puede estar en el pasado")
+E   fastapi.exceptions.HTTPException: 422: La fecha límite no puede estar en el pasado
+=========================== short test summary info ============================
+FAILED tests/test_tasks_service.py::test_clock_today_usa_la_zona_horaria_del_negocio[19h]
+FAILED tests/test_tasks_service.py::test_clock_today_usa_la_zona_horaria_del_negocio[23h59]
+FAILED tests/test_tasks_service.py::test_crear_tarea_para_hoy_en_la_tarde_de_cdmx_es_valido
+3 failed, 22 passed in 0.09s

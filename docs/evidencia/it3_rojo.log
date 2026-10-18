@@ -1,0 +1,4 @@
+FAILED tests/test_tasks.py::test_reintento_con_misma_llave_y_mismo_cuerpo_devuelve_la_misma_tarea
+FAILED tests/test_tasks.py::test_misma_llave_con_otro_cuerpo_devuelve_409 - a...
+FAILED tests/test_tasks.py::test_reintento_equivalente_tras_normalizar_el_titulo_no_duplica
+3 failed, 39 passed in 0.28s
